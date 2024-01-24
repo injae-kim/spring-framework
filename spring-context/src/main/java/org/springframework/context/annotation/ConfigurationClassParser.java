@@ -243,7 +243,9 @@ class ConfigurationClassParser {
 		try {
 			sourceClass = asSourceClass(configClass, filter);
 			do {
-				sourceClass = doProcessConfigurationClass(configClass, sourceClass, filter);
+				if (sourceClass != null) {
+					sourceClass = doProcessConfigurationClass(configClass, sourceClass, filter);
+				}
 			}
 			while (sourceClass != null);
 		}
@@ -570,7 +572,9 @@ class ConfigurationClassParser {
 
 	/**
 	 * Factory method to obtain a {@link SourceClass} from a {@link ConfigurationClass}.
+	 * @return {@code null} if the filter matches
 	 */
+	@Nullable
 	private SourceClass asSourceClass(ConfigurationClass configurationClass, Predicate<String> filter) throws IOException {
 		AnnotationMetadata metadata = configurationClass.getMetadata();
 		if (metadata instanceof StandardAnnotationMetadata standardAnnotationMetadata) {
@@ -581,10 +585,15 @@ class ConfigurationClassParser {
 
 	/**
 	 * Factory method to obtain a {@link SourceClass} from a {@link Class}.
+	 * @return {@code null} if the filter matches
 	 */
+	@Nullable
 	SourceClass asSourceClass(@Nullable Class<?> classType, Predicate<String> filter) throws IOException {
-		if (classType == null || filter.test(classType.getName())) {
+		if (classType == null) {
 			return this.objectSourceClass;
+		}
+		if (filter.test(classType.getName())) {
+			return null;
 		}
 		try {
 			// Sanity test that we can reflectively read annotations,
@@ -606,17 +615,25 @@ class ConfigurationClassParser {
 	private Collection<SourceClass> asSourceClasses(String[] classNames, Predicate<String> filter) throws IOException {
 		List<SourceClass> annotatedClasses = new ArrayList<>(classNames.length);
 		for (String className : classNames) {
-			annotatedClasses.add(asSourceClass(className, filter));
+			SourceClass sourceClass = asSourceClass(className, filter);
+			if (sourceClass != null) {
+				annotatedClasses.add(sourceClass);
+			}
 		}
 		return annotatedClasses;
 	}
 
 	/**
 	 * Factory method to obtain a {@link SourceClass} from a class name.
+	 * @return {@code null} if the filter matches
 	 */
+	@Nullable
 	SourceClass asSourceClass(@Nullable String className, Predicate<String> filter) throws IOException {
-		if (className == null || filter.test(className)) {
+		if (className == null) {
 			return this.objectSourceClass;
+		}
+		if (filter.test(className)) {
+			return null;
 		}
 		if (className.startsWith("java")) {
 			// Never use ASM for core java types
@@ -743,9 +760,13 @@ class ConfigurationClassParser {
 				grouping.getImports().forEach(entry -> {
 					ConfigurationClass configurationClass = this.configurationClasses.get(entry.getMetadata());
 					try {
-						processImports(configurationClass, asSourceClass(configurationClass, exclusionFilter),
-								Collections.singleton(asSourceClass(entry.getImportClassName(), exclusionFilter)),
-								exclusionFilter, false);
+						SourceClass currentSourceClass = asSourceClass(configurationClass, exclusionFilter);
+						SourceClass importCandidates = asSourceClass(entry.getImportClassName(), exclusionFilter);
+						if (currentSourceClass != null && importCandidates != null) {
+							processImports(configurationClass, currentSourceClass,
+									Collections.singleton(importCandidates),
+									exclusionFilter, false);
+						}
 					}
 					catch (BeanDefinitionStoreException ex) {
 						throw ex;
@@ -906,7 +927,10 @@ class ConfigurationClassParser {
 					Class<?>[] declaredClasses = sourceClass.getDeclaredClasses();
 					List<SourceClass> members = new ArrayList<>(declaredClasses.length);
 					for (Class<?> declaredClass : declaredClasses) {
-						members.add(asSourceClass(declaredClass, DEFAULT_EXCLUSION_FILTER));
+						SourceClass declaredSourceClass = asSourceClass(declaredClass, DEFAULT_EXCLUSION_FILTER);
+						if (declaredSourceClass != null) {
+							members.add(declaredSourceClass);
+						}
 					}
 					return members;
 				}
@@ -923,7 +947,10 @@ class ConfigurationClassParser {
 			List<SourceClass> members = new ArrayList<>(memberClassNames.length);
 			for (String memberClassName : memberClassNames) {
 				try {
-					members.add(asSourceClass(memberClassName, DEFAULT_EXCLUSION_FILTER));
+					SourceClass memberSourceClass = asSourceClass(memberClassName, DEFAULT_EXCLUSION_FILTER);
+					if (memberSourceClass != null) {
+						members.add(asSourceClass(memberClassName, DEFAULT_EXCLUSION_FILTER));
+					}
 				}
 				catch (IOException ex) {
 					// Let's skip it if it's not resolvable - we're just looking for candidates
@@ -936,6 +963,7 @@ class ConfigurationClassParser {
 			return members;
 		}
 
+		@Nullable
 		public SourceClass getSuperClass() throws IOException {
 			if (this.source instanceof Class<?> sourceClass) {
 				return asSourceClass(sourceClass.getSuperclass(), DEFAULT_EXCLUSION_FILTER);
@@ -948,12 +976,18 @@ class ConfigurationClassParser {
 			Set<SourceClass> result = new LinkedHashSet<>();
 			if (this.source instanceof Class<?> sourceClass) {
 				for (Class<?> ifcClass : sourceClass.getInterfaces()) {
-					result.add(asSourceClass(ifcClass, DEFAULT_EXCLUSION_FILTER));
+					SourceClass asSourceClass = asSourceClass(ifcClass, DEFAULT_EXCLUSION_FILTER);
+					if (asSourceClass != null) {
+						result.add(asSourceClass);
+					}
 				}
 			}
 			else {
 				for (String className : this.metadata.getInterfaceNames()) {
-					result.add(asSourceClass(className, DEFAULT_EXCLUSION_FILTER));
+					SourceClass asSourceClass = asSourceClass(className, DEFAULT_EXCLUSION_FILTER);
+					if (asSourceClass != null) {
+						result.add(asSourceClass);
+					}
 				}
 			}
 			return result;
@@ -966,7 +1000,10 @@ class ConfigurationClassParser {
 					Class<?> annType = ann.annotationType();
 					if (!annType.getName().startsWith("java")) {
 						try {
-							result.add(asSourceClass(annType, DEFAULT_EXCLUSION_FILTER));
+							SourceClass asSourceClass = asSourceClass(annType, DEFAULT_EXCLUSION_FILTER);
+							if (asSourceClass != null) {
+								result.add(asSourceClass);
+							}
 						}
 						catch (Throwable ex) {
 							// An annotation not present on the classpath is being ignored
@@ -979,7 +1016,10 @@ class ConfigurationClassParser {
 				for (String className : this.metadata.getAnnotationTypes()) {
 					if (!className.startsWith("java")) {
 						try {
-							result.add(getRelated(className));
+							SourceClass sourceClass = getRelated(className);
+							if (sourceClass != null) {
+								result.add(sourceClass);
+							}
 						}
 						catch (Throwable ex) {
 							// An annotation not present on the classpath is being ignored
@@ -999,11 +1039,15 @@ class ConfigurationClassParser {
 			String[] classNames = (String[]) annotationAttributes.get(attribute);
 			Set<SourceClass> result = new LinkedHashSet<>();
 			for (String className : classNames) {
-				result.add(getRelated(className));
+				SourceClass sourceClass = getRelated(className);
+				if (sourceClass != null) {
+					result.add(sourceClass);
+				}
 			}
 			return result;
 		}
 
+		@Nullable
 		private SourceClass getRelated(String className) throws IOException {
 			if (this.source instanceof Class<?> sourceClass) {
 				try {
